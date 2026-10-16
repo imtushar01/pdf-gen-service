@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment files — NEVER commit these, they contain secrets
+.env
+.env.local
+.env.*.local
+
+# Generated artifacts (PDFs, ZIPs) — not source code
+artifacts/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# TypeScript incremental compilation cache
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+
+# Prisma generated client (regenerated from schema)
+node_modules/.prisma/
