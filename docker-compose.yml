@@ -1,0 +1,70 @@
+###############################################################################
+# docker-compose.yml — Local development infrastructure
+#
+# Provides PostgreSQL and Redis for local development and testing.
+# This does NOT run the NestJS application — run that with `npm run start:dev`.
+#
+# Usage:
+#   docker compose up -d          # Start infrastructure
+#   docker compose down           # Stop (keeps data volumes)
+#   docker compose down -v        # Stop and DELETE all data
+#   docker compose logs -f        # Stream logs
+###############################################################################
+
+services:
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: pdf_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pdfuser
+      POSTGRES_PASSWORD: pdfpass
+      POSTGRES_DB: pdfdb
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdfuser -d pdfdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  # Redis is the BullMQ queue backend.
+  #
+  # Why AOF persistence?
+  # By default Redis is an in-memory store — restart = queue lost.
+  # appendonly yes enables Append-Only File persistence so queued jobs
+  # survive Redis restarts. This is important even in development so we
+  # don't lose in-progress jobs during hot-reload cycles.
+  #
+  # NOTE: AOF adds a small write overhead. For production, use
+  # appendfsync everysec (the default with AOF) which gives a good
+  # balance between durability and performance.
+  redis:
+    image: redis:7-alpine
+    container_name: pdf_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy noeviction
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

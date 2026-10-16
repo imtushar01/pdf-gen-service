@@ -21,6 +21,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ApiKeyGuard } from './common/guards/api-key.guard';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HealthModule } from './health/health.module';
+import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { HealthModule } from './health/health.module';
 
     // ── Feature Modules ──────────────────────────────────────────────────
     HealthModule,
+    PrismaModule,
     // Future modules will be added here:
     // JobsModule, BatchesModule, StorageModule, RendererModule, DownloadsModule
   ],

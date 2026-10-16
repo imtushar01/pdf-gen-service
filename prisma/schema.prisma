@@ -1,0 +1,263 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Prisma Schema — PDF Generation Service
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// This file is the single source of truth for the database schema.
+// Run `npx prisma migrate dev` to apply changes to your local database.
+// Run `npx prisma generate` to regenerate the TypeScript client.
+//
+// Data model overview:
+//
+//   Job          — one PDF generation task (single or part of a batch)
+//   InputSnapshot — immutable copy of the input JSON at job acceptance time
+//   Artifact     — metadata for a generated PDF file (path, size, checksum)
+//   Batch        — a bulk request containing up to 100 jobs
+//   BatchItem    — join table linking Batch → Job with per-item status
+//   ZipArtifact  — metadata for the generated ZIP file for a completed batch
+//
+// State machine:
+//   Job:   PENDING → PROCESSING → COMPLETED | FAILED
+//   Batch: PENDING → PROCESSING → COMPLETED | PARTIAL_FAILURE | FAILED
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum DocumentType {
+  INVOICE
+  PURCHASE_ORDER
+}
+
+// Job lifecycle states.
+// PENDING     — accepted, queued, not yet picked up by a worker
+// PROCESSING  — worker has claimed the job and is rendering
+// COMPLETED   — PDF generated, artifact saved, checksum recorded
+// FAILED      — all retry attempts exhausted; terminal failure
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// Batch lifecycle states.
+// PENDING          — batch accepted, child jobs created, none started
+// PROCESSING       — at least one child job is being rendered
+// COMPLETED        — all child jobs completed, ZIP artifact created
+// PARTIAL_FAILURE  — some jobs completed, some failed terminally; ZIP contains successes
+// FAILED           — all child jobs failed terminally
+enum BatchStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  PARTIAL_FAILURE
+  FAILED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Job
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// One Job = one PDF to generate.
+// Can be standalone (no batch) or a child of a Batch.
+//
+// idempotencyKey:   Supplied by the caller. Prevents duplicate jobs for the
+//                   same logical request. Stored with a payload fingerprint
+//                   to detect key reuse with a different payload.
+//
+// payloadHash:      SHA-256 of the raw input JSON. If a caller reuses an
+//                   idempotency key with a DIFFERENT payload, we detect it
+//                   and return an error instead of silently processing the
+//                   wrong data.
+//
+// retryCount:       How many times this job has been attempted.
+//                   Incremented by the worker before each attempt.
+//
+// errorMessage:     The last error that caused a failure. Human-readable,
+//                   not exposed directly to end users in prod.
+model Job {
+  id             String       @id @default(uuid())
+  documentType   DocumentType
+  status         JobStatus    @default(PENDING)
+  idempotencyKey String       @unique
+  payloadHash    String       // SHA-256 of the submitted input JSON
+
+  retryCount     Int          @default(0)
+  maxRetries     Int          @default(3)
+  errorMessage   String?
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  completedAt    DateTime?
+
+  // Relations
+  snapshot       InputSnapshot?
+  artifact       Artifact?
+  batchItem      BatchItem?
+
+  @@index([status])
+  @@index([idempotencyKey])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// InputSnapshot
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// WHY THIS TABLE EXISTS — the "87th PDF" problem:
+//
+// Without a snapshot, a worker rendering job #87 in a batch would re-fetch
+// data from the ERP. If the invoice was updated 3 minutes after the batch
+// was submitted, job #87 would contain newer data than job #1.
+//
+// With a snapshot, we capture the EXACT JSON payload at acceptance time.
+// The worker always reads from the snapshot, never from live ERP data.
+// This guarantees: "every PDF in this batch reflects data as it was at
+// the moment the batch was submitted."
+//
+// IMPORTANT BOUNDARY: We guarantee the snapshot is immutable after acceptance.
+// We cannot guarantee the ERP submitted a consistent snapshot of its own
+// database. If the ERP read invoice #87 in a dirty read before submitting,
+// that is the ERP's responsibility, not ours.
+//
+// data: The raw JSON input as submitted by the caller. Stored as Json type
+//       (PostgreSQL JSONB) for efficient storage and future querying.
+model InputSnapshot {
+  id        String   @id @default(uuid())
+  jobId     String   @unique
+  data      Json     // The exact input payload, frozen at acceptance time
+  createdAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Artifact
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Metadata for a generated PDF file.
+// The actual file lives on the filesystem (or S3 in production).
+// We store the path and checksum here, not the file bytes.
+//
+// storagePath:  Relative path within the artifacts directory.
+//               Absolute paths are never stored (no filesystem leakage).
+//
+// sha256:       SHA-256 hash of the file contents computed after writing.
+//               Used for tamper evidence. If the file is re-hashed later
+//               and the hash doesn't match, the file was modified.
+//               NOTE: SHA-256 proves bit-for-bit integrity only when the
+//               reference hash is stored somewhere the file's modifier
+//               cannot also change. It does NOT provide digital signatures
+//               or non-repudiation.
+//
+// sizeBytes:    File size in bytes. Used to serve correct Content-Length
+//               headers and to validate Range requests.
+model Artifact {
+  id          String   @id @default(uuid())
+  jobId       String   @unique
+  storagePath String   // Relative path, e.g. "pdfs/abc123.pdf"
+  sha256      String   // SHA-256 hex digest
+  sizeBytes   Int
+  mimeType    String   @default("application/pdf")
+  createdAt   DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Batch
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A bulk request containing 1–100 documents.
+// The Batch tracks overall progress and holds a reference to the ZIP artifact
+// once bulk generation is complete.
+//
+// totalCount:     Number of documents submitted.
+// completedCount: Number of child jobs that reached COMPLETED.
+// failedCount:    Number of child jobs that reached FAILED (terminal).
+model Batch {
+  id             String      @id @default(uuid())
+  status         BatchStatus @default(PENDING)
+  totalCount     Int
+  completedCount Int         @default(0)
+  failedCount    Int         @default(0)
+  errorSummary   String?     // Human-readable summary of failures
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  completedAt    DateTime?
+
+  // Relations
+  items       BatchItem[]
+  zipArtifact ZipArtifact?
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BatchItem
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Join table between Batch and Job.
+// Each item represents one document within a batch.
+//
+// sequenceNumber: The order in which this item appeared in the original
+//                 bulk request (0-indexed). Used when assembling the ZIP
+//                 and failure manifest.
+model BatchItem {
+  id             String   @id @default(uuid())
+  batchId        String
+  jobId          String   @unique  // Each Job belongs to at most one batch item
+  sequenceNumber Int      // Position in the original request (0-indexed)
+  createdAt      DateTime @default(now())
+
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  job   Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, sequenceNumber])
+  @@index([batchId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ZipArtifact
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Metadata for the generated ZIP file that bundles all PDFs in a batch.
+//
+// WHY WE PERSIST THE ZIP instead of streaming it on demand:
+// The assessment constraint is "bulk downloads of 50+ PDFs frequently fail
+// midway through the download on unreliable connections."
+//
+// If we streamed the ZIP on demand, a download failure would mean we need
+// to re-read and re-zip all PDFs again. Worse, we couldn't support Range
+// requests (HTTP resume) because the ZIP byte positions would change.
+//
+// By pre-building and persisting the ZIP, we can:
+//   1. Serve it with Accept-Ranges: bytes (HTTP Range resume support)
+//   2. Return the exact same bytes on retry — no re-generation
+//   3. Give the client a stable Content-Length for progress bars
+//
+// failureManifest: JSON array describing which jobs failed and why.
+//                  Included in the ZIP as "failures.json" and also
+//                  accessible via the batch status endpoint.
+model ZipArtifact {
+  id              String   @id @default(uuid())
+  batchId         String   @unique
+  storagePath     String   // Relative path, e.g. "zips/batch-abc123.zip"
+  sha256          String
+  sizeBytes       Int
+  failureManifest Json?    // Array of { sequenceNumber, documentType, error }
+  createdAt       DateTime @default(now())
+
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+}
