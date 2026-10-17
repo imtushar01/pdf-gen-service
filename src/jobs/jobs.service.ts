@@ -22,12 +22,15 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { Prisma, Job } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { DocumentValidationService } from '../documents/document-validation.service';
 import { CreateJobDto, DocumentType } from '../documents/dto/create-job.dto';
 import { fingerprintPayload } from '../common/utils/fingerprint.util';
+import { PDF_QUEUE, RENDER_JOB, RenderJobData } from '../queue/queue.constants';
 
 @Injectable()
 export class JobsService {
@@ -36,7 +39,33 @@ export class JobsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly validationService: DocumentValidationService,
+    @InjectQueue(PDF_QUEUE)
+    private readonly pdfQueue: Queue<RenderJobData>,
   ) {}
+
+  /**
+   * Enqueue a render job. Called after the job + snapshot are persisted.
+   *
+   * THE DATABASE-TO-QUEUE GAP:
+   * There is a window between "job persisted in DB" and "job enqueued in
+   * Redis". If the API crashes in this window, the job exists in PENDING
+   * but nothing will ever render it. We use the job's own ID as the BullMQ
+   * jobId (deduplication) so a recovery reconciler (M9) can safely re-enqueue
+   * PENDING jobs without creating duplicates. A full transactional outbox is
+   * deferred and documented in APPROACH.md.
+   */
+  async enqueueRender(jobId: string): Promise<void> {
+    await this.pdfQueue.add(
+      RENDER_JOB,
+      { jobId },
+      {
+        // Use the DB job ID as the BullMQ job ID. Re-adding the same ID is
+        // a no-op in BullMQ, so re-enqueueing during recovery is safe.
+        jobId,
+      },
+    );
+    this.logger.log(`Enqueued render job ${jobId}`);
+  }
 
   /**
    * Create a single-document generation job.
@@ -138,6 +167,11 @@ export class JobsService {
       this.logger.log(
         `Created job ${job.id} (${job.documentType}) with key ${idempotencyKey}`,
       );
+
+      // Enqueue for rendering. If this throws (Redis down), the job stays
+      // PENDING in the DB and the recovery reconciler (M9) will pick it up.
+      await this.enqueueRender(job.id);
+
       return { job, isExisting: false };
     } catch (err) {
       // CONCURRENCY: If a parallel request inserted the same key between

@@ -31,6 +31,7 @@ describe('JobsService', () => {
     $transaction: jest.Mock;
   };
   let validation: { validateDocument: jest.Mock };
+  let queue: { add: jest.Mock };
 
   const samplePayload = { invoiceNumber: 'INV-1', total: 100 };
 
@@ -47,10 +48,15 @@ describe('JobsService', () => {
     validation = {
       validateDocument: jest.fn().mockResolvedValue({}),
     };
+    // Mock BullMQ queue — add() resolves to a fake job
+    queue = {
+      add: jest.fn().mockResolvedValue({ id: 'bull-job' }),
+    };
 
     service = new JobsService(
       prisma as unknown as PrismaService,
       validation as unknown as DocumentValidationService,
+      queue as never,
     );
   });
 
@@ -76,6 +82,31 @@ describe('JobsService', () => {
     expect(result.job.id).toBe('job-1');
     expect(validation.validateDocument).toHaveBeenCalled();
     expect(prisma.job.create).toHaveBeenCalled();
+    // A new job must be enqueued for rendering
+    expect(queue.add).toHaveBeenCalledWith(
+      expect.any(String),
+      { jobId: 'job-1' },
+      expect.objectContaining({ jobId: 'job-1' }),
+    );
+  });
+
+  it('should NOT enqueue when returning an existing job', async () => {
+    const existingHash = fingerprintPayload(samplePayload);
+    prisma.job.findUnique.mockResolvedValue({
+      id: 'existing-job',
+      idempotencyKey: 'key-1',
+      payloadHash: existingHash,
+      status: 'COMPLETED',
+    });
+
+    await service.createJob({
+      documentType: DocumentType.INVOICE,
+      data: samplePayload,
+      idempotencyKey: 'key-1',
+    });
+
+    // Idempotent retry must not enqueue a duplicate render
+    expect(queue.add).not.toHaveBeenCalled();
   });
 
   it('should return existing job for same key + same payload (Case 1)', async () => {
