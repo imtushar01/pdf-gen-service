@@ -24,6 +24,7 @@ import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { DocumentsModule } from './documents/documents.module';
 import { RendererModule } from './renderer/renderer.module';
+import { JobsModule } from './jobs/jobs.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { RendererModule } from './renderer/renderer.module';
     PrismaModule,
     DocumentsModule,
     RendererModule,
+    JobsModule,
     // Future modules will be added here:
     // JobsModule, BatchesModule, StorageModule, RendererModule, DownloadsModule
   ],
