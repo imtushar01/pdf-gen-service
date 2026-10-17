@@ -22,6 +22,8 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { DocumentsModule } from './documents/documents.module';
+import { RendererModule } from './renderer/renderer.module';
 
 @Module({
   imports: [
@@ -45,6 +47,8 @@ import { PrismaModule } from './prisma/prisma.module';
     // ── Feature Modules ──────────────────────────────────────────────────
     HealthModule,
     PrismaModule,
+    DocumentsModule,
+    RendererModule,
     // Future modules will be added here:
     // JobsModule, BatchesModule, StorageModule, RendererModule, DownloadsModule
   ],

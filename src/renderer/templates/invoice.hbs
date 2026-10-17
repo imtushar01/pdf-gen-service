@@ -1,0 +1,111 @@
+{{!--
+  invoice.hbs — Handlebars template for invoice PDF rendering.
+
+  SECURITY: All user-controlled values use {{ }} (double braces) which
+  auto-escapes HTML entities. We NEVER use {{{ }}} for user data.
+  Only the CSS block uses {{{ }}} because we generate it ourselves.
+
+  CHUNKED RENDERING: When a document has > 100 line items, the renderer
+  splits it into multiple pages. Each chunk receives a subset of lineItems
+  with chunkIndex and totalChunks context variables. The CSS page-break
+  ensures each chunk starts on a new page in the final merged PDF.
+--}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Invoice {{invoiceNumber}}</title>
+  {{{styles}}}
+</head>
+<body>
+  <div class="document">
+    {{!-- Header with invoice number and dates --}}
+    {{#if (eq chunkIndex 0)}}
+    <div class="header">
+      <div class="header-left">
+        <h1>INVOICE</h1>
+        <div class="doc-number">{{invoiceNumber}}</div>
+      </div>
+      <div class="header-right">
+        <div class="meta-row"><span class="label">Date:</span> {{invoiceDate}}</div>
+        {{#if dueDate}}<div class="meta-row"><span class="label">Due:</span> {{dueDate}}</div>{{/if}}
+      </div>
+    </div>
+
+    {{!-- Seller and Buyer info --}}
+    <div class="parties">
+      <div class="party">
+        <div class="party-label">From</div>
+        <div class="party-name">{{sellerName}}</div>
+        <div class="party-address">{{sellerAddress}}</div>
+        {{#if sellerGstin}}<div class="party-gstin">GSTIN: {{sellerGstin}}</div>{{/if}}
+      </div>
+      <div class="party">
+        <div class="party-label">Bill To</div>
+        <div class="party-name">{{buyerName}}</div>
+        <div class="party-address">{{buyerAddress}}</div>
+        {{#if buyerGstin}}<div class="party-gstin">GSTIN: {{buyerGstin}}</div>{{/if}}
+      </div>
+    </div>
+    {{/if}}
+
+    {{!-- Line items table --}}
+    <table class="line-items">
+      <thead>
+        <tr>
+          <th class="col-num">#</th>
+          <th class="col-desc">Description</th>
+          {{#if showHsn}}<th class="col-hsn">HSN</th>{{/if}}
+          <th class="col-qty">Qty</th>
+          <th class="col-price">Unit Price</th>
+          <th class="col-amount">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each lineItems}}
+        <tr>
+          <td class="col-num">{{this.sequenceNumber}}</td>
+          <td class="col-desc">{{this.description}}</td>
+          {{#if ../showHsn}}<td class="col-hsn">{{this.hsnCode}}</td>{{/if}}
+          <td class="col-qty">{{formatNumber this.quantity}}</td>
+          <td class="col-price">{{formatCurrency this.unitPrice ../currency}}</td>
+          <td class="col-amount">{{formatCurrency this.amount ../currency}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+
+    {{!-- Totals (only on last chunk) --}}
+    {{#if (eq chunkIndex (dec totalChunks))}}
+    <div class="totals">
+      <div class="total-row">
+        <span class="total-label">Subtotal</span>
+        <span class="total-value">{{formatCurrency computedSubtotal currency}}</span>
+      </div>
+      {{#if taxRate}}
+      <div class="total-row">
+        <span class="total-label">Tax ({{taxRate}}%)</span>
+        <span class="total-value">{{formatCurrency (mul computedSubtotal (div taxRate 100)) currency}}</span>
+      </div>
+      {{/if}}
+      <div class="total-row total-final">
+        <span class="total-label">Total</span>
+        <span class="total-value">{{formatCurrency totalAmount currency}}</span>
+      </div>
+    </div>
+
+    {{#if notes}}
+    <div class="notes">
+      <div class="notes-label">Notes</div>
+      <div class="notes-text">{{notes}}</div>
+    </div>
+    {{/if}}
+    {{/if}}
+
+    {{!-- Page indicator for multi-chunk documents --}}
+    {{#if (gt totalChunks 1)}}
+    <div class="page-footer">Page {{inc chunkIndex}} of {{totalChunks}}</div>
+    {{/if}}
+  </div>
+</body>
+</html>

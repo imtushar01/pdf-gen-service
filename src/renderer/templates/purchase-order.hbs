@@ -1,0 +1,97 @@
+{{!--
+  purchase-order.hbs — Handlebars template for purchase order PDF.
+
+  Same security rules as invoice.hbs: all user data uses {{ }} (escaped).
+  Only CSS uses {{{ }}} because we generate it ourselves.
+--}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Purchase Order {{poNumber}}</title>
+  {{{styles}}}
+</head>
+<body>
+  <div class="document">
+    {{#if (eq chunkIndex 0)}}
+    <div class="header">
+      <div class="header-left">
+        <h1>PURCHASE ORDER</h1>
+        <div class="doc-number">{{poNumber}}</div>
+      </div>
+      <div class="header-right">
+        <div class="meta-row"><span class="label">Date:</span> {{poDate}}</div>
+      </div>
+    </div>
+
+    <div class="parties">
+      <div class="party">
+        <div class="party-label">Buyer</div>
+        <div class="party-name">{{buyerName}}</div>
+        <div class="party-address">{{buyerAddress}}</div>
+      </div>
+      <div class="party">
+        <div class="party-label">Vendor</div>
+        <div class="party-name">{{vendorName}}</div>
+        <div class="party-address">{{vendorAddress}}</div>
+      </div>
+    </div>
+    {{/if}}
+
+    <table class="line-items">
+      <thead>
+        <tr>
+          <th class="col-num">#</th>
+          <th class="col-desc">Description</th>
+          {{#if showHsn}}<th class="col-hsn">HSN</th>{{/if}}
+          <th class="col-qty">Qty</th>
+          <th class="col-price">Unit Price</th>
+          <th class="col-amount">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each lineItems}}
+        <tr>
+          <td class="col-num">{{this.sequenceNumber}}</td>
+          <td class="col-desc">{{this.description}}</td>
+          {{#if ../showHsn}}<td class="col-hsn">{{this.hsnCode}}</td>{{/if}}
+          <td class="col-qty">{{formatNumber this.quantity}}</td>
+          <td class="col-price">{{formatCurrency this.unitPrice ../currency}}</td>
+          <td class="col-amount">{{formatCurrency this.amount ../currency}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+
+    {{#if (eq chunkIndex (dec totalChunks))}}
+    <div class="totals">
+      <div class="total-row">
+        <span class="total-label">Subtotal</span>
+        <span class="total-value">{{formatCurrency computedSubtotal currency}}</span>
+      </div>
+      {{#if taxRate}}
+      <div class="total-row">
+        <span class="total-label">Tax ({{taxRate}}%)</span>
+        <span class="total-value">{{formatCurrency (mul computedSubtotal (div taxRate 100)) currency}}</span>
+      </div>
+      {{/if}}
+      <div class="total-row total-final">
+        <span class="total-label">Total</span>
+        <span class="total-value">{{formatCurrency totalAmount currency}}</span>
+      </div>
+    </div>
+
+    {{#if notes}}
+    <div class="notes">
+      <div class="notes-label">Notes</div>
+      <div class="notes-text">{{notes}}</div>
+    </div>
+    {{/if}}
+    {{/if}}
+
+    {{#if (gt totalChunks 1)}}
+    <div class="page-footer">Page {{inc chunkIndex}} of {{totalChunks}}</div>
+    {{/if}}
+  </div>
+</body>
+</html>
