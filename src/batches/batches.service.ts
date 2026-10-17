@@ -177,6 +177,23 @@ export class BatchesService {
   }
 
   /**
+   * Public entrypoint used by the recovery reconciler (M9) to re-drive
+   * finalization for a batch that was reverted from a stuck FINALIZING state
+   * back to PROCESSING. Safe to call repeatedly — tryFinalize re-claims
+   * atomically and the ZIP build is idempotent.
+   */
+  async retryFinalization(batchId: string): Promise<void> {
+    const batch = await this.prisma.batch.findUnique({
+      where: { id: batchId },
+    });
+    if (!batch) return;
+    // Only attempt if all children are actually done.
+    if (batch.completedCount + batch.failedCount >= batch.totalCount) {
+      await this.tryFinalize(batchId);
+    }
+  }
+
+  /**
    * RACE-SAFE FINALIZATION.
    *
    * Many workers may call this simultaneously when the last few jobs finish

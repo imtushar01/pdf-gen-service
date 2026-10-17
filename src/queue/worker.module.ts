@@ -28,6 +28,7 @@ import { ArtifactsModule } from '../artifacts/artifacts.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { StorageModule } from '../storage/storage.module';
 import { BatchesModule } from '../batches/batches.module';
+import { RecoveryModule } from '../recovery/recovery.module';
 import { PdfProcessor } from './pdf.processor';
 
 @Module({
@@ -45,6 +46,7 @@ import { PdfProcessor } from './pdf.processor';
     ArtifactsModule,
     DocumentsModule,
     BatchesModule,
+    RecoveryModule,
   ],
   providers: [PdfProcessor],
 })

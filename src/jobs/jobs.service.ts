@@ -168,9 +168,19 @@ export class JobsService {
         `Created job ${job.id} (${job.documentType}) with key ${idempotencyKey}`,
       );
 
-      // Enqueue for rendering. If this throws (Redis down), the job stays
-      // PENDING in the DB and the recovery reconciler (M9) will pick it up.
-      await this.enqueueRender(job.id);
+      // Enqueue for rendering. If this fails (e.g. Redis is down), the job is
+      // already safely persisted as PENDING. We do NOT fail the request —
+      // the recovery reconciler (M9) will re-enqueue orphaned PENDING jobs.
+      // This closes the database-to-queue gap: acceptance is durable even if
+      // enqueueing transiently fails.
+      try {
+        await this.enqueueRender(job.id);
+      } catch (enqueueErr) {
+        this.logger.warn(
+          `Job ${job.id} persisted but enqueue failed; reconciler will retry: ` +
+            `${enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)}`,
+        );
+      }
 
       return { job, isExisting: false };
     } catch (err) {
