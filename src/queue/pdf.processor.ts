@@ -42,6 +42,7 @@ import { DocumentValidationService } from '../documents/document-validation.serv
 import { DocumentType } from '../documents/dto/create-job.dto';
 import { PDF_QUEUE, RenderJobData } from './queue.constants';
 import { classifyError } from './error-classification';
+import { BatchesService } from '../batches/batches.service';
 
 @Processor(PDF_QUEUE, {
   // Bounded concurrency — how many jobs this worker renders in parallel.
@@ -57,6 +58,7 @@ export class PdfProcessor extends WorkerHost {
     private readonly artifactService: ArtifactService,
     private readonly validation: DocumentValidationService,
     private readonly config: ConfigService,
+    private readonly batchesService: BatchesService,
   ) {
     super();
   }
@@ -116,6 +118,9 @@ export class PdfProcessor extends WorkerHost {
       });
 
       this.logger.log(`Job ${jobId} completed`);
+
+      // Notify the batch (no-op if this isn't a batch job).
+      await this.batchesService.onChildJobDone(jobId, true);
     } catch (err) {
       const errorClass = classifyError(err);
       const message = err instanceof Error ? err.message : String(err);
@@ -127,6 +132,8 @@ export class PdfProcessor extends WorkerHost {
       if (errorClass === 'terminal') {
         // Record the failure now and tell BullMQ not to retry.
         await this.markFailed(jobId, message);
+        // Notify the batch of a terminal child failure.
+        await this.batchesService.onChildJobDone(jobId, false);
         throw new UnrecoverableError(message);
       }
 
@@ -184,6 +191,12 @@ export class PdfProcessor extends WorkerHost {
         `Job ${job.data.jobId} exhausted ${maxAttempts} attempts — marking FAILED`,
       );
       await this.markFailed(job.data.jobId, err.message);
+      // A retryable job that finally gave up is a terminal failure for its
+      // batch. Notify so the batch can finalize. Guard against double-count:
+      // onChildJobDone is only called here (exhausted) OR in the terminal
+      // branch of process(), never both, because UnrecoverableError does not
+      // re-enter the retry path.
+      await this.batchesService.onChildJobDone(job.data.jobId, false);
     }
   }
 }

@@ -58,6 +58,10 @@ enum JobStatus {
 enum BatchStatus {
   PENDING
   PROCESSING
+  // FINALIZING is a transient state claimed by exactly ONE worker (via an
+  // atomic conditional update) once all child jobs are done. The claiming
+  // worker builds the ZIP. This prevents two workers from both building it.
+  FINALIZING
   COMPLETED
   PARTIAL_FAILURE
   FAILED

@@ -29,6 +29,7 @@ import { StorageModule } from './storage/storage.module';
 import { ArtifactsModule } from './artifacts/artifacts.module';
 import { DownloadsModule } from './downloads/downloads.module';
 import { QueueModule } from './queue/queue.module';
+import { BatchesModule } from './batches/batches.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { QueueModule } from './queue/queue.module';
     ArtifactsModule,
     DownloadsModule,
     QueueModule,
+    BatchesModule,
     // Future modules will be added here:
     // JobsModule, BatchesModule, StorageModule, RendererModule, DownloadsModule
   ],
