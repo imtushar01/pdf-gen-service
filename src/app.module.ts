@@ -27,6 +27,7 @@ import { RendererModule } from './renderer/renderer.module';
 import { JobsModule } from './jobs/jobs.module';
 import { StorageModule } from './storage/storage.module';
 import { ArtifactsModule } from './artifacts/artifacts.module';
+import { DownloadsModule } from './downloads/downloads.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { ArtifactsModule } from './artifacts/artifacts.module';
     JobsModule,
     StorageModule,
     ArtifactsModule,
+    DownloadsModule,
     // Future modules will be added here:
     // JobsModule, BatchesModule, StorageModule, RendererModule, DownloadsModule
   ],
