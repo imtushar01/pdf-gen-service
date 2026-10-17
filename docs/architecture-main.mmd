@@ -1,0 +1,32 @@
+flowchart TB
+    ERP["Django ERP Monolith<br/>(EC2 r6i.large)<br/>existing - not re-architected"]
+
+    subgraph PDFService["PDF Generation Microservice"]
+        direction TB
+        API["API Process<br/>(NestJS HTTP)<br/>main.ts"]
+        Worker["Worker Process<br/>(BullMQ consumer)<br/>worker.ts"]
+    end
+
+    subgraph Datastores["Data and Infrastructure"]
+        PG[("PostgreSQL<br/>jobs, batches, snapshots,<br/>artifacts, zip metadata")]
+        Redis[("Redis<br/>BullMQ queue")]
+        Storage["Artifact Storage<br/>(filesystem today,<br/>S3 in production)"]
+    end
+
+    ERP -->|"1. POST /jobs or /batches"| API
+    API -->|"2. validate + persist job + snapshot (tx)"| PG
+    API -->|"3. enqueue jobId"| Redis
+    API -->|"202 Accepted + id"| ERP
+
+    Redis -->|"4. deliver job"| Worker
+    Worker -->|"5. load snapshot"| PG
+    Worker -->|"6. render PDF (Chromium)"| Worker
+    Worker -->|"7. atomic write + SHA-256"| Storage
+    Worker -->|"8. record artifact + COMPLETED"| PG
+
+    ERP -->|"9. GET status (poll)"| API
+    ERP -->|"10. GET download (HTTP Range)"| API
+    API -->|"stream bytes"| Storage
+
+    Worker -.->|"recovery reconciler (cron)"| PG
+    Worker -.->|"build + persist ZIP"| Storage

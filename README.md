@@ -1,114 +1,295 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# PDF Generation Microservice
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+A standalone HTTP microservice that generates PDF documents (invoices and
+purchase orders) for an ERP application. It supports single-document and bulk
+(up to 100) generation, asynchronous processing with a background worker,
+resumable downloads, and tamper-evident artifacts.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Built with NestJS + TypeScript, PostgreSQL (Prisma), Redis (BullMQ), and
+Puppeteer. Everything runs locally and free via Docker Compose.
 
-## Description
+> **Assessment note:** This repository is a take-home submission. The most
+> important document is [`APPROACH.md`](./APPROACH.md), which explains the
+> reasoning, trade-offs, capacity math, and honest weaknesses. The
+> architecture diagram is [`architecture-diagram.png`](./architecture-diagram.png)
+> (Mermaid source in [`docs/architecture.md`](./docs/architecture.md)).
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+---
 
-## Project setup
+## Features
+
+- **Single + bulk generation** — one PDF, or a batch of up to 100.
+- **Asynchronous processing** — the API accepts a job (202) and a separate
+  worker process renders it. Chromium memory pressure can't starve the API.
+- **Immutable input snapshots** — each job freezes its input at acceptance
+  time, so bulk documents never render stale data (the "87th PDF" problem).
+- **Idempotency** — duplicate requests return the existing job; a reused key
+  with a different payload is rejected (409).
+- **Large documents** — 500+ line-item documents are rendered in chunks and
+  merged, avoiding Puppeteer OOM crashes.
+- **Resumable downloads** — HTTP Range support for both PDFs and ZIPs, so
+  downloads survive unreliable connections without restarting from zero.
+- **Tamper evidence** — SHA-256 checksum stored per artifact, verifiable on
+  demand.
+- **Partial bulk failure** — the ZIP contains every successful PDF plus a
+  `failures.json` manifest for the rest.
+- **Crash recovery** — a reconciler re-enqueues orphaned/stale jobs and
+  retries stuck batch finalizations.
+- **Structured logging, Swagger docs, 90+ tests.**
+
+---
+
+## Tech stack
+
+| Concern | Choice |
+|---------|--------|
+| API framework | NestJS 10 + TypeScript 5 |
+| Validation | class-validator + class-transformer |
+| API docs | NestJS Swagger (`/api/docs`) |
+| Database | PostgreSQL 16 |
+| ORM / migrations | Prisma 5 |
+| Queue | BullMQ 5 on Redis 7 |
+| PDF rendering | Puppeteer (headless Chromium) |
+| Templating | Handlebars (auto-escaped) |
+| Large-doc merge | pdf-lib |
+| ZIP | archiver |
+| Checksums | Node.js `crypto` (SHA-256) |
+| Storage | Filesystem adapter behind an interface (S3-ready) |
+| Tests | Jest + Supertest |
+| Load test | k6 |
+| Local infra | Docker Compose |
+
+See `APPROACH.md` for why each was chosen over the alternatives.
+
+---
+
+## Prerequisites
+
+- **Node.js 20+** (developed on Node 24)
+- **Docker + Docker Compose** (for PostgreSQL and Redis)
+- No cloud account or paid service is required.
+
+---
+
+## Setup
 
 ```bash
-$ npm install
+# 1. Install dependencies
+npm install
+
+# 2. Copy the environment template and review it
+cp .env.example .env
+#    The defaults work with the Docker Compose setup below.
+#    Set a strong API_KEY for anything beyond local dev.
+
+# 3. Start PostgreSQL and Redis
+docker compose up -d
+
+# 4. Apply database migrations
+npm run db:migrate
 ```
 
-## Compile and run the project
+> **Note on ports:** Docker Compose maps PostgreSQL to host port **5434** and
+> Redis to **6380** (to avoid clashing with other local services). The
+> `.env.example` already matches these.
+
+---
+
+## Running
+
+The service runs as **two processes**: the API and the worker. Start both.
 
 ```bash
-# development
-$ npm run start
+# Terminal 1 — API (HTTP server)
+npm run start:dev
 
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+# Terminal 2 — Worker (renders PDFs from the queue)
+npm run worker:dev
 ```
 
-## Run tests
+- API: `http://localhost:3000`
+- Swagger UI: `http://localhost:3000/api/docs`
+- Health: `http://localhost:3000/health` (unauthenticated)
+
+For production builds:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm run build
+npm run start:prod   # API
+npm run worker       # worker (separate process / container)
 ```
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Authentication
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Every endpoint except `/health` requires a header:
+
+```
+X-API-Key: <value of API_KEY from your .env>
+```
+
+---
+
+## API quick reference
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET  | `/health` | Liveness + DB readiness (no auth) |
+| POST | `/api/v1/jobs` | Create a single-document job |
+| GET  | `/api/v1/jobs/:id` | Job status |
+| GET  | `/api/v1/jobs/:id/download` | Download the PDF (Range-aware) |
+| GET  | `/api/v1/jobs/:id/checksum` | Stored checksum + verification |
+| POST | `/api/v1/batches` | Create a bulk batch (≤100 docs) |
+| GET  | `/api/v1/batches/:id` | Batch status + per-item progress |
+| GET  | `/api/v1/batches/:id/download` | Download the ZIP (Range-aware) |
+
+### Create a single job
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+curl -X POST http://localhost:3000/api/v1/jobs \
+  -H "X-API-Key: dev-only-api-key-change-in-production" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "documentType": "INVOICE",
+    "idempotencyKey": "demo-inv-001",
+    "data": {
+      "invoiceNumber": "INV-2026-001",
+      "invoiceDate": "2026-10-17",
+      "sellerName": "Acme Corp",
+      "sellerAddress": "123 Industrial Area, Bangalore",
+      "buyerName": "TechStart Solutions",
+      "buyerAddress": "456 Tech Park, Hyderabad",
+      "currency": "INR",
+      "lineItems": [
+        { "description": "Server hosting", "quantity": 5, "unitPrice": 1500, "amount": 7500 }
+      ],
+      "taxRate": 18,
+      "totalAmount": 8850
+    }
+  }'
+# → 202 Accepted  { "id": "...", "status": "PENDING", ... }
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### Poll status, then download
 
-## Observability
+```bash
+JOB_ID=... # from the create response
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
+curl http://localhost:3000/api/v1/jobs/$JOB_ID \
+  -H "X-API-Key: dev-only-api-key-change-in-production"
+# → { "status": "COMPLETED", ... }
 
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
+# Download the PDF
+curl -o invoice.pdf http://localhost:3000/api/v1/jobs/$JOB_ID/download \
+  -H "X-API-Key: dev-only-api-key-change-in-production"
 
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
+# Verify the checksum
+curl http://localhost:3000/api/v1/jobs/$JOB_ID/checksum \
+  -H "X-API-Key: dev-only-api-key-change-in-production"
+# → { "sha256": "...", "verified": true }
+```
 
-## Resources
+### Resume an interrupted download (HTTP Range)
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+# Fetch only bytes 1000 onward (what curl -C - does under the hood)
+curl -H "Range: bytes=1000-" \
+  http://localhost:3000/api/v1/jobs/$JOB_ID/download \
+  -H "X-API-Key: dev-only-api-key-change-in-production"
+# → 206 Partial Content
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observer](https://observer.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+### Create a bulk batch
 
-## Support
+```bash
+curl -X POST http://localhost:3000/api/v1/batches \
+  -H "X-API-Key: dev-only-api-key-change-in-production" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "idempotencyKey": "demo-batch-001",
+    "items": [
+      { "documentType": "INVOICE", "data": { ... } },
+      { "documentType": "PURCHASE_ORDER", "data": { ... } }
+    ]
+  }'
+# → 202 Accepted { "id": "...", "totalCount": 2, "status": "PENDING" }
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+# Poll, then download the ZIP when zipReady is true
+curl -o batch.zip http://localhost:3000/api/v1/batches/<batchId>/download \
+  -H "X-API-Key: dev-only-api-key-change-in-production"
+```
 
-## Stay in touch
+---
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## Testing
 
-## License
+```bash
+# Unit + integration tests (needs docker compose up for the DB/Redis-backed ones)
+npm test
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+# End-to-end tests (API + worker against real Postgres/Redis)
+npm run test:e2e
+
+# Measure real render latency + memory on your machine
+npm run benchmark
+
+# Load test the API acceptance rate (requires k6 installed)
+API_KEY=dev-only-api-key-change-in-production k6 run scripts/load-test.js
+```
+
+Measured benchmark results for the development machine are in
+[`scripts/BENCHMARK_RESULTS.md`](./scripts/BENCHMARK_RESULTS.md).
+
+---
+
+## Project structure
+
+```
+src/
+  main.ts                  API entrypoint
+  worker.ts                Worker entrypoint (separate process)
+  config/                  Env config + Joi validation
+  common/                  Guard, filter, interceptor, logger, utils
+  health/                  Health endpoint
+  prisma/                  PrismaService + module
+  documents/               DTOs + document validation
+  renderer/                Puppeteer renderer + Handlebars templates
+  jobs/                    Single-job API + orchestration (producer)
+  storage/                 IStorageService + filesystem adapter
+  artifacts/               Artifact metadata + checksum verification
+  downloads/               Range-aware download endpoints
+  queue/                   BullMQ queue, processor, worker module
+  batches/                 Bulk batches + ZIP builder
+  recovery/                Crash-recovery reconciler
+prisma/                    schema.prisma + migrations
+scripts/                   benchmark + k6 load test
+docs/                      architecture (Mermaid)
+test/integration/          integration + e2e tests
+```
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `API_KEY is required` on startup | Copy `.env.example` to `.env` and set `API_KEY`. |
+| DB connection refused | `docker compose up -d`; confirm port 5434 is free. |
+| Port 5434/6380 already allocated | Another container uses it — edit `docker-compose.yml` and `.env` to a free port. |
+| Jobs stay `PENDING` | Start the worker (`npm run worker:dev`). The reconciler also re-enqueues after ~30s. |
+| Puppeteer fails to launch | Ensure the Chromium download during `npm install` completed; re-run `npm install`. |
+| Health shows `degraded` | The database is unreachable — check the `checks.database` field. |
+
+---
+
+## Known limitations
+
+See `APPROACH.md` §6 for the full, honest list. In short:
+
+- **Local filesystem storage** is single-node only; production needs S3.
+- **Capacity**: this local setup does not sustain 1,000 PDFs/min — see the
+  capacity math. Queueing absorbs bursts, not sustained under-capacity.
+- **Tamper evidence** is checksum-based, not a digital signature.
+- **Database-to-queue consistency** uses a recovery reconciler, not a full
+  transactional outbox.
