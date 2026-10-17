@@ -9,8 +9,10 @@ dist/
 .env.local
 .env.*.local
 
-# Generated artifacts (PDFs, ZIPs) — not source code
-artifacts/
+# Generated artifacts (PDFs, ZIPs) — not source code.
+# Anchored to the repo root with a leading slash so it does NOT match
+# the source directory src/artifacts/.
+/artifacts/
 
 # Logs
 *.log

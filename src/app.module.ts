@@ -25,6 +25,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { DocumentsModule } from './documents/documents.module';
 import { RendererModule } from './renderer/renderer.module';
 import { JobsModule } from './jobs/jobs.module';
+import { StorageModule } from './storage/storage.module';
+import { ArtifactsModule } from './artifacts/artifacts.module';
 
 @Module({
   imports: [
@@ -51,6 +53,8 @@ import { JobsModule } from './jobs/jobs.module';
     DocumentsModule,
     RendererModule,
     JobsModule,
+    StorageModule,
+    ArtifactsModule,
     // Future modules will be added here:
     // JobsModule, BatchesModule, StorageModule, RendererModule, DownloadsModule
   ],
