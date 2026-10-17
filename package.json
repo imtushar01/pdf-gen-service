@@ -23,7 +23,8 @@
     "test:integration": "jest --testPathPatterns='integration' --forceExit --no-coverage",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "benchmark": "ts-node -r tsconfig-paths/register scripts/benchmark-render.ts"
   },
   "dependencies": {
     "@nestjs/bullmq": "^10.2.3",

@@ -18,13 +18,14 @@
 import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import { WorkerModule } from './queue/worker.module';
+import { JsonLogger } from './common/logging/json-logger.service';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Worker');
 
   // createApplicationContext: DI container without an HTTP server.
   const app = await NestFactory.createApplicationContext(WorkerModule, {
-    logger: ['log', 'error', 'warn', 'debug'],
+    logger: new JsonLogger(),
   });
 
   // Enable graceful shutdown hooks so onModuleDestroy runs (closes Puppeteer,

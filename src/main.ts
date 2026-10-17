@@ -9,16 +9,16 @@
  * BullMQ worker process. Keeping them separate means Chromium memory pressure
  * in workers cannot starve the API process.
  */
-import { NestFactory, Reflector } from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { JsonLogger } from './common/logging/json-logger.service';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
-    // Structured logging: NestJS default logger writes to stdout.
-    // In production, pipe stdout to a log aggregator.
-    logger: ['log', 'error', 'warn', 'debug'],
+    // Structured JSON logs in production, readable text in dev/test.
+    logger: new JsonLogger(),
   });
 
   // ── Global prefix ──────────────────────────────────────────────────────
