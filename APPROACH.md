@@ -270,6 +270,11 @@ future improvement if stricter guarantees are ever required.
 ## 5. AI Usage Log
 
 > Public links of conversations you had with AI.
+- https://chatgpt.com/share/6ad44aed-61e8-83ee-8c6d-e81ca222e369
+- https://chatgpt.com/share/6ad3dc9a-0180-83ee-8b8c-c49def755e19
+- https://claude.ai/share/263f5311-490f-46a3-897c-af3af2e8fb00
+- https://claude.ai/share/994ab667-f6dd-4787-b380-8df7e1af6518
+- https://chatgpt.com/share/6ad44b47-2718-83ee-a27e-cd4ce829a5e0
 
 
 ---
